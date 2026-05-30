@@ -65,6 +65,18 @@ def _is_connection_refused(exc: BaseException) -> bool:
     return isinstance(exc, ConnectionRefusedError)
 
 
+def _is_timeout(exc: BaseException) -> bool:
+    """True if the underlying cause is a socket timeout (not the same as TCP refused)."""
+    if isinstance(exc, TimeoutError):
+        return True
+    cause = exc.__cause__ or exc.__context__
+    while cause is not None:
+        if isinstance(cause, TimeoutError):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return False
+
+
 def _explain_unreachable(url: str, exc: BaseException) -> str:
     if _is_connection_refused(exc):
         return (
@@ -73,6 +85,12 @@ def _explain_unreachable(url: str, exc: BaseException) -> str:
             f"  - retry with --ainternet for the public hub ({AINTERNET_URL}), or\n"
             f"  - retry with --brein for the secondary fallback ({BREIN_URL}), or\n"
             f"  - set CMAIL_API_URL / use --url <host>:<port>."
+        )
+    if _is_timeout(exc):
+        return (
+            f"tibet-cmail: backend at {url} did not respond within timeout.\n"
+            f"  - Server may be overloaded or stalled; retry with --timeout 30, or\n"
+            f"  - retry with --ainternet / --brein for a different backend."
         )
     reason = getattr(exc, "reason", exc)
     return f"tibet-cmail: cannot reach {url}: {reason}"
@@ -158,7 +176,7 @@ def cmd_send(args: argparse.Namespace) -> int:
     except urllib.error.HTTPError as e:
         print(f"tibet-cmail: send failed: HTTP {e.code}", file=sys.stderr)
         return 1
-    except urllib.error.URLError as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         print(_explain_unreachable(args.url, e), file=sys.stderr)
         return 2
     latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -240,7 +258,7 @@ def _fetch_polls(args: argparse.Namespace, mark_read: bool) -> tuple[int, list[d
             return 5, []
         print(f"tibet-cmail: pull failed: HTTP {e.code}", file=sys.stderr)
         return 1, []
-    except urllib.error.URLError as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         print(_explain_unreachable(args.url, e), file=sys.stderr)
         return 2, []
     return 0, data.get("polls", [])
@@ -384,7 +402,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     url = f"{args.url.rstrip('/')}/api/ipoll/status"
     try:
         data = _get_json(url, timeout=args.timeout)
-    except urllib.error.URLError as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         print(_explain_unreachable(args.url, e), file=sys.stderr)
         return 2
     print(f"tibet-cmail backend: {args.url}")

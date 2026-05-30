@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +35,11 @@ CMAIL_SENT_INTENT = "cmail.message.sent"
 CMAIL_RECEIVED_INTENT = "cmail.message.received"
 
 DEFAULT_AUDIT_PATH = Path.home() / ".cmail" / "audit.jsonl"
+
+# Optional cap-bus runtime endpoint — when set, audit events are POSTed there
+# *in addition to* the JSONL append. Best-effort: never blocks or fails the send.
+CAPBUS_URL_ENV = "CMAIL_CAPBUS_URL"
+CAPBUS_POST_TIMEOUT = 2.0  # short, never delays the cmail-send path
 
 
 def _utcnow_iso() -> str:
@@ -130,12 +137,45 @@ def log_event(event: dict[str, Any], path: Optional[Path | str] = None) -> Path:
 
     Creates the parent directory if needed. Returns the path that was written
     so callers can show it to the user.
+
+    Side-effect: if env var CMAIL_CAPBUS_URL is set, the event is *also*
+    POSTed to that endpoint (best-effort, never raises). This lets a cap-bus
+    runtime stream cmail events as they happen instead of waiting for an
+    out-of-band log scrape.
     """
     target = Path(path) if path is not None else DEFAULT_AUDIT_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    _maybe_post_to_capbus(event)
     return target
+
+
+def _maybe_post_to_capbus(event: dict[str, Any]) -> None:
+    """Optional POST to a cap-bus runtime endpoint. Best-effort, swallows errors.
+
+    The endpoint shape is intentionally loose: any service that accepts a
+    POST of a gateway-event.v1 JSON record at <url>/event qualifies. A small
+    timeout (2 s) means an offline endpoint never stalls the send pipeline.
+    """
+    base = os.environ.get(CAPBUS_URL_ENV)
+    if not base:
+        return
+    url = f"{base.rstrip('/')}/event"
+    try:
+        body = json.dumps(event, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "tibet-cmail-audit/0.2.2",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=CAPBUS_POST_TIMEOUT):
+            pass
+    except Exception:  # noqa: BLE001 — best-effort, audit-log is source of truth
+        pass
 
 
 def try_validate(event: dict[str, Any]) -> list[str]:

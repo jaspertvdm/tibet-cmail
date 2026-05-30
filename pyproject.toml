@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tibet-cmail"
-version = "0.2.1"
-description = "Cmail — capsulated email + command hub for HumoticaOS. Light Mode (I-Poll + JSON + audit) + Sealed Mode (AES-256-GCM with AAD-bound message_id/from/to). Light is dep-free; Sealed pulls in `cryptography` via the `[sealed]` extra."
+version = "0.2.3"
+description = "Cmail — capsulated email + command hub for HumoticaOS. Light Mode (I-Poll + JSON + audit) + Sealed Mode (AES-256-GCM with AAD). 0.2.3: catches TimeoutError + OSError on send/pull (was raw traceback) with friendly diagnostic, plus opt-in cap-bus runtime POST via CMAIL_CAPBUS_URL env var."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
