@@ -26,7 +26,15 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+import time
+
 from . import __version__
+from .audit import (
+    DEFAULT_AUDIT_PATH,
+    build_received_event,
+    build_sent_event,
+    log_event,
+)
 from .envelope import CMAIL_KIND, Envelope, build_envelope
 
 
@@ -98,6 +106,7 @@ def cmd_send(args: argparse.Namespace) -> int:
         "poll_type": "PUSH",
     }
     url = f"{args.url.rstrip('/')}/api/ipoll/push"
+    t0 = time.perf_counter()
     try:
         data = _post_json(url, payload, timeout=args.timeout)
     except urllib.error.HTTPError as e:
@@ -106,11 +115,23 @@ def cmd_send(args: argparse.Namespace) -> int:
     except urllib.error.URLError as e:
         print(_explain_unreachable(args.url, e), file=sys.stderr)
         return 2
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+
+    # Emit + log a gateway-event.v1 (cmail.message.sent) audit record.
+    audit_path = None
+    audit_err = None
+    if not args.no_audit:
+        try:
+            event = build_sent_event(envelope, latency_ms=latency_ms)
+            audit_path = log_event(event, args.audit_log)
+        except Exception as e:  # never let audit break a send
+            audit_err = str(e)
 
     if args.json:
         print(json.dumps({
             "envelope": envelope.to_dict(),
             "i_poll": data,
+            "audit_log": str(audit_path) if audit_path else None,
         }, indent=2, ensure_ascii=False))
         return 0
 
@@ -119,7 +140,12 @@ def cmd_send(args: argparse.Namespace) -> int:
     print(f"  from={envelope.from_}  to={envelope.to}")
     print(f"  subject: {envelope.subject}")
     print(f"  content_hash: {envelope.content_hash}")
+    print(f"  latency: {latency_ms:.1f}ms")
     print(f"  i-poll envelope: {poll_id}")
+    if audit_path:
+        print(f"  audit: {audit_path} (gateway-event.v1: cmail.message.sent)")
+    elif audit_err:
+        print(f"  audit: SKIPPED ({audit_err})")
     return 0
 
 
@@ -171,6 +197,18 @@ def cmd_inbox(args: argparse.Namespace) -> int:
                 cmails.append(Envelope.from_json(content))
             except Exception:
                 continue
+
+    # Emit + log a gateway-event.v1 (cmail.message.received) per observed cmail.
+    audit_events = 0
+    if not args.no_audit and cmails:
+        for e in cmails:
+            try:
+                event = build_received_event(e, recipient=args.agent)
+                log_event(event, args.audit_log)
+                audit_events += 1
+            except Exception:
+                pass
+
     if args.json:
         print(json.dumps([e.to_dict() for e in cmails], indent=2, ensure_ascii=False))
         return 0
@@ -184,6 +222,8 @@ def cmd_inbox(args: argparse.Namespace) -> int:
         if len(subject) > 50:
             subject = subject[:47] + "..."
         print(f"  [{e.message_id}]  from={e.from_:<18}  {subject}")
+    if audit_events:
+        print(f"  ({audit_events} cmail.message.received audit event(s) logged)")
     return 0
 
 
@@ -245,6 +285,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="HTTP timeout in seconds (default: 5.0)")
     parser.add_argument("--json", action="store_true",
                         help="emit raw JSON instead of human output")
+    parser.add_argument("--no-audit", action="store_true",
+                        help="skip the gateway-event.v1 audit-log append")
+    parser.add_argument("--audit-log", default=None,
+                        help=f"path to the cmail audit-log (default: {DEFAULT_AUDIT_PATH})")
     parser.add_argument("--version", action="version", version=f"tibet-cmail {__version__}")
 
     sub = parser.add_subparsers(dest="cmd", required=True)

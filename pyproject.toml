@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tibet-cmail"
-version = "0.1.0"
-description = "Cmail — capsulated email + command hub for HumoticaOS. Light Mode v0.1: I-Poll transport + JSON envelopes + cap-bus event emit. Sealed Mode (TBZ + continuityd) comes in 0.2.x."
+version = "0.1.1"
+description = "Cmail — capsulated email + command hub for HumoticaOS. Light Mode v0.1.1: I-Poll transport + JSON envelopes + cap-bus gateway-event.v1 audit (cmail.message.sent/received). Sealed Mode (TBZ + continuityd) comes in 0.2.x."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

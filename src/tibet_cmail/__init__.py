@@ -19,8 +19,29 @@ Public API:
     from tibet_cmail.cli import main as cli_main
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
+from .audit import (
+    CMAIL_RECEIVED_INTENT,
+    CMAIL_SENT_INTENT,
+    DEFAULT_AUDIT_PATH,
+    build_received_event,
+    build_sent_event,
+    log_event,
+    try_validate,
+)
 from .envelope import Envelope, build_envelope, hash_body
 
-__all__ = ["Envelope", "build_envelope", "hash_body", "__version__"]
+__all__ = [
+    "Envelope",
+    "build_envelope",
+    "hash_body",
+    "CMAIL_SENT_INTENT",
+    "CMAIL_RECEIVED_INTENT",
+    "DEFAULT_AUDIT_PATH",
+    "build_sent_event",
+    "build_received_event",
+    "log_event",
+    "try_validate",
+    "__version__",
+]
