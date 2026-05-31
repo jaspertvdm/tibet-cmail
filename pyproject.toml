@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tibet-cmail"
-version = "0.2.5"
-description = "Cmail — capsulated email + command hub for HumoticaOS. Light + Sealed Mode + audit + cap-bus runtime POST. 0.2.5: gateway-event.v1 records now carry top-level `subject` and `message_type` (alongside 0.2.4's `kind` + `sealed`) so tibet-audit cockpit tail/table display the human subject instead of the opaque event_id."
+version = "0.3.0"
+description = "Cmail — capsulated email + command hub for HumoticaOS. Light + Sealed Mode + audit + cap-bus runtime POST. 0.3.0: **autonomous posture-cmail** — `tibet-cmail posture-watch` tails verdict.v1 JSONL stream and emits a cmail to the operator on every posture transition (cold-start / mode change / quarantine / offline). Plus bootstrap-or-die discipline: tibet-core + jis-core now runtime deps."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -35,12 +35,17 @@ classifiers = [
     "Topic :: System :: Networking",
 ]
 
-# Light Mode 0.1.x + 0.2.x: pure stdlib (argparse + urllib + json + hashlib + uuid).
-# Sealed Mode 0.2.x: AES-256-GCM via the `cryptography` library, opt-in via [sealed].
-dependencies = []
+# Bootstrap-or-die discipline (Jasper 28 mei + 31 mei): every Humotica package
+# that we touch declares tibet-core + jis-core as runtime deps so the central
+# chain + central identity-store get pulled in transitively. Keeps the stack
+# coherent and lets PyPI stats reflect actual pair-bind usage.
+dependencies = [
+    "tibet-core>=0.5.0b2",
+    "jis-core>=0.4.0b1",
+]
 
 [project.optional-dependencies]
-# Enables `tibet-cmail send --sealed`, `keygen`, and `read` of sealed envelopes.
+# Sealed Mode pulls in AES-256-GCM via the `cryptography` library.
 sealed = ["cryptography>=42.0"]
 
 [project.urls]

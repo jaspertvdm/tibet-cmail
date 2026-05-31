@@ -36,6 +36,12 @@ from .audit import (
     log_event,
 )
 from .envelope import CMAIL_KIND, Envelope, build_envelope
+from .posture_watcher import (
+    DEFAULT_OPERATOR,
+    DEFAULT_STATE_PATH,
+    build_posture_envelope,
+    scan_for_transitions,
+)
 from .sealed import (
     SEALED_KIND,
     SealedModeUnavailable,
@@ -381,6 +387,95 @@ def cmd_read(args: argparse.Namespace) -> int:
     return 4
 
 
+def cmd_posture_watch(args: argparse.Namespace) -> int:
+    """Watch a verdict.v1 JSONL stream and emit a cmail per posture transition."""
+    from pathlib import Path
+    source = Path(args.source) if args.source else Path.home() / ".cmail" / "verdicts.jsonl"
+    state = Path(args.state) if args.state else None
+
+    if not source.exists() and not args.follow:
+        print(
+            f"tibet-cmail: no verdict.v1 source at {source}\n"
+            f"  - Use --source <path> to point at a JSONL log, or\n"
+            f"  - retry with --follow to wait for the file to appear.",
+            file=sys.stderr,
+        )
+        return 3
+
+    transitions_emitted = 0
+    transitions_sent = 0
+    transitions_failed = 0
+
+    try:
+        for transition in scan_for_transitions(source, state_path=state, follow=args.follow):
+            envelope = build_posture_envelope(transition, operator=args.operator)
+            transitions_emitted += 1
+
+            if args.dry_run:
+                if args.json:
+                    print(json.dumps(envelope.to_dict(), indent=2, ensure_ascii=False))
+                else:
+                    print(f"--- transition {transitions_emitted} ---")
+                    print(f"  subject: {envelope.subject}")
+                    print(f"  to:      {envelope.to}")
+                    print(f"  body (first 3 lines):")
+                    for line in envelope.body.splitlines()[:3]:
+                        print(f"    {line}")
+                continue
+
+            # Send via brain_api I-Poll PUSH (same path as `tibet-cmail send`)
+            payload = {
+                "from_agent": envelope.from_,
+                "to_agent": envelope.to,
+                "content": envelope.to_json(),
+                "poll_type": "PUSH",
+            }
+            url = f"{args.url.rstrip('/')}/api/ipoll/push"
+            try:
+                _post_json(url, payload, timeout=args.timeout)
+                transitions_sent += 1
+                # Audit the autonomous send too
+                if not args.no_audit:
+                    try:
+                        event = build_sent_event(envelope, latency_ms=0.0, sealed=False)
+                        event["payload"]["autonomous"] = True
+                        event["payload"]["trigger"] = "posture.transition.v1"
+                        log_event(event, args.audit_log)
+                    except Exception:
+                        pass
+                print(
+                    f"posture-cmail sent: {envelope.subject} → {envelope.to}",
+                    file=sys.stderr,
+                )
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+                transitions_failed += 1
+                print(
+                    f"posture-cmail send FAILED for {envelope.subject}: {e}",
+                    file=sys.stderr,
+                )
+    except KeyboardInterrupt:
+        print(f"\ntibet-cmail: posture-watch interrupted; "
+              f"{transitions_emitted} transitions seen, {transitions_sent} cmails sent.",
+              file=sys.stderr)
+        return 0
+
+    if args.json:
+        print(json.dumps({
+            "transitions_emitted": transitions_emitted,
+            "transitions_sent": transitions_sent,
+            "transitions_failed": transitions_failed,
+            "dry_run": bool(args.dry_run),
+        }, indent=2))
+    else:
+        print(
+            f"\nposture-watch summary: {transitions_emitted} transition(s) detected, "
+            f"{transitions_sent} sent, {transitions_failed} failed"
+            + (" (dry-run)" if args.dry_run else ""),
+            file=sys.stderr,
+        )
+    return 0
+
+
 def cmd_keygen(args: argparse.Namespace) -> int:
     """Generate a fresh 32-byte AES-256 key (64-char hex)."""
     try:
@@ -469,6 +564,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_keygen = sub.add_parser("keygen", help="generate a fresh AES-256 key for Sealed Mode")
     p_keygen.set_defaults(func=cmd_keygen)
+
+    # Posture-watch: autonomous cmail on airlock_runtime_verdict.v1 transitions.
+    p_pw = sub.add_parser(
+        "posture-watch",
+        help="emit a cmail when an airlock-runtime posture transitions (verdict.v1)",
+    )
+    p_pw.add_argument("operator", nargs="?", default=DEFAULT_OPERATOR,
+                      help=f"recipient .aint agent for posture alerts (default: {DEFAULT_OPERATOR})")
+    p_pw.add_argument("--source", default=None,
+                      help="path to verdict.v1 JSONL (default: ~/.cmail/verdicts.jsonl)")
+    p_pw.add_argument("--state", default=None,
+                      help=f"path to last-seen state file (default: {DEFAULT_STATE_PATH})")
+    p_pw.add_argument("--follow", action="store_true",
+                      help="keep watching (tail-F style); otherwise one-shot scan")
+    p_pw.add_argument("--dry-run", action="store_true",
+                      help="print posture envelopes instead of sending them")
+    p_pw.set_defaults(func=cmd_posture_watch)
 
     return parser
 

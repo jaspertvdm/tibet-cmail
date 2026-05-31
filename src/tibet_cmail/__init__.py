@@ -19,7 +19,7 @@ Public API:
     from tibet_cmail.cli import main as cli_main
 """
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 from .audit import (
     CMAIL_RECEIVED_INTENT,
@@ -31,6 +31,16 @@ from .audit import (
     try_validate,
 )
 from .envelope import Envelope, build_envelope, hash_body
+from .posture_watcher import (
+    DEFAULT_OPERATOR,
+    DEFAULT_STATE_PATH,
+    VERDICT_KIND,
+    PostureTransition,
+    build_posture_envelope,
+    detect_transition,
+    is_verdict_record,
+    scan_for_transitions,
+)
 from .sealed import (
     SEAL_ALG,
     SEALED_KIND,
